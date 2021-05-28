@@ -1,0 +1,82 @@
+ARG BASE_IMAGE=centos:7
+FROM $BASE_IMAGE as base_build
+
+LABEL version="1.0.0"
+
+ARG PROJECT_NAME="ov-doublefree-repro"
+
+ARG ov_source_branch=master
+ARG JOBS
+
+ENV http_proxy=http://proxy-chain.intel.com:911
+ENV https_proxy=http://proxy-chain.intel.com:912
+
+RUN yum install -d6 -y epel-release centos-release-scl && yum update -d6 -y && yum install -d6 -y \
+            boost-atomic \
+            boost-chrono \
+            boost-filesystem \
+            boost-program-options \
+            boost-thread \
+            boost-system \
+            boost-date-time \
+            cmake3 \
+            gcc-c++ \
+            automake \
+            autoconf \
+            curl \
+            gdb \
+            git \
+            libusb \
+            libusbx-devel \
+            libcurl-devel \
+            libtool \
+            libuuid-devel \
+            libxml2-devel \
+            make \
+            numactl-libs \
+            ocl-icd \
+            patch \
+            pkg-config \
+            pulseaudio-libs-devel \
+            python2 \
+            python2-pip \
+            python2-devel \
+            python2-setuptools \
+            python2-virtualenv \
+            python3 \
+            python3-pip \
+            python3-devel \
+            python3-setuptools \
+            python3-virtualenv \
+            unzip \
+            wget \
+            which \
+            boost-thread \
+            boost-system \
+            boost-filesystem \
+            boost-chrono \
+            boost-program-options \
+            boost-date-time \
+            boost-atomic \
+            libxml2-devel \
+            yum-utils \
+            numactl-libs \
+            nano \
+            unzip && \
+            yum clean all
+
+################### BUILD OPENVINO FROM SOURCE ############################
+# Build OpenVINO and nGraph (OV dependency) with D_GLIBCXX_USE_CXX11_ABI=1
+RUN git clone https://github.com/openvinotoolkit/openvino /openvino ; cd /openvino ; git checkout $ov_source_branch; git submodule update --init --recursive ; git config --global user.email "docker-build@intel.com"
+WORKDIR /openvino/build
+RUN cmake3 -DCMAKE_BUILD_TYPE=Release -DENABLE_SAMPLES=1 -DNGRAPH_USE_CXX_ABI=1 -DCMAKE_CXX_FLAGS=" -D_GLIBCXX_USE_CXX11_ABI=1 -Wno-error=parentheses "  ..
+RUN make --jobs=$JOBS
+################## END OF OPENVINO SOURCE BUILD ######################
+
+################## RUN BENCHMARK APP ############################
+WORKDIR /openvino/bin/intel64/Release
+
+COPY models /models/
+
+RUN for run in {1..100000}; do echo "Loading IR model..."; timeout 3 ./benchmark_app -d CPU -t 130 -m /models/resnet50-tf-int8/1/resnet50-tf-int8.xml -b 16 -nireq 48 | grep Error; echo "Loading ONNX..."; timeout 3 ./benchmark_app -m /models/onnx/1/resnet50-v1-7.onnx | grep Error; done
+################## END OF RUN BENCHMARK APP ######################
